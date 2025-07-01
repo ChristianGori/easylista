@@ -119,17 +119,7 @@
             list-style: none;
         }
 
-        .item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 16px;
-            background: #f8f9fa;
-            border-radius: 12px;
-            margin-bottom: 8px;
-            transition: all 0.3s ease;
-            border-left: 4px solid transparent;
-        }
+
 
         .item:hover {
             transform: translateX(4px);
@@ -335,6 +325,51 @@
             width: 100%;
             margin-top: 10px;
         }
+
+        .delete-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: #dc3545;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 16px;
+            gap: 8px;
+            opacity: 0;
+            transform: scale(0.8);
+            transition: all 0.3s ease;
+            z-index: 10;
+        }
+
+        .delete-overlay.show {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .item {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            background: #f8f9fa;
+            border-radius: 12px;
+            margin-bottom: 8px;
+            transition: all 0.3s ease;
+            border-left: 4px solid transparent;
+            user-select: none;
+        }
+
+        .item.deleting {
+            transform: scale(0.95);
+            background: #ffe6e6;
+        }
     </style>
 </head>
 <body>
@@ -412,6 +447,8 @@
         let currentTab = 'lista';
         let items = [];
         let favorites = new Set();
+        let deleteTimeout = null;
+        let currentDeleteElement = null;
 
         // Initialize App
         document.addEventListener('DOMContentLoaded', function() {
@@ -580,14 +617,23 @@
                 '<span class="drag-handle" title="Tieni premuto per spostare">⋮⋮</span>' : '';
             
             return `
-                <li class="item ${item.completed ? 'completed' : ''}" data-id="${item.id}">
+                <li class="item ${item.completed ? 'completed' : ''}" data-id="${item.id}"
+                    onmousedown="startDeleteTimer(${item.id}, event)"
+                    onmouseup="cancelDeleteTimer()"
+                    onmouseleave="cancelDeleteTimer()"
+                    ontouchstart="startDeleteTimer(${item.id}, event)"
+                    ontouchend="cancelDeleteTimer()"
+                    ontouchcancel="cancelDeleteTimer()">
                     ${dragHandle}
                     <input type="checkbox" class="item-checkbox" ${item.completed ? 'checked' : ''} 
-                           onchange="toggleItem(${item.id})">
+                           onchange="toggleItem(${item.id})" onclick="event.stopPropagation()">
                     <span class="item-text">${item.text}${purchaseInfo}</span>
-                    <button class="favorite-btn" onclick="toggleFavorite(${item.id})" title="Aggiungi ai preferiti">
+                    <button class="favorite-btn" onclick="toggleFavorite(${item.id}); event.stopPropagation();" title="Aggiungi ai preferiti">
                         ${isFavorite ? '❤️' : '🤍'}
                     </button>
+                    <div class="delete-overlay" id="delete-${item.id}">
+                        🗑️ Elimina
+                    </div>
                 </li>
             `;
         }
@@ -669,7 +715,80 @@
             closeAIModal();
         }
 
-        // Data Persistence
+        // Delete functionality
+        function startDeleteTimer(id, event) {
+            // Don't start timer if clicking on interactive elements
+            if (event.target.classList.contains('item-checkbox') || 
+                event.target.classList.contains('favorite-btn') || 
+                event.target.classList.contains('drag-handle')) {
+                return;
+            }
+            
+            // Cancel any existing timer
+            cancelDeleteTimer();
+            
+            currentDeleteElement = id;
+            
+            // Start delete timer (1.5 seconds)
+            deleteTimeout = setTimeout(() => {
+                showDeleteOverlay(id);
+            }, 1500);
+        }
+
+        function cancelDeleteTimer() {
+            if (deleteTimeout) {
+                clearTimeout(deleteTimeout);
+                deleteTimeout = null;
+            }
+            
+            if (currentDeleteElement) {
+                hideDeleteOverlay(currentDeleteElement);
+                currentDeleteElement = null;
+            }
+        }
+
+        function showDeleteOverlay(id) {
+            const overlay = document.getElementById(`delete-${id}`);
+            const item = document.querySelector(`[data-id="${id}"]`);
+            
+            if (overlay && item) {
+                item.classList.add('deleting');
+                overlay.classList.add('show');
+                
+                // Auto-delete after 2 more seconds if still showing
+                setTimeout(() => {
+                    if (overlay.classList.contains('show')) {
+                        deleteItemPermanently(id);
+                    }
+                }, 2000);
+            }
+        }
+
+        function hideDeleteOverlay(id) {
+            const overlay = document.getElementById(`delete-${id}`);
+            const item = document.querySelector(`[data-id="${id}"]`);
+            
+            if (overlay && item) {
+                overlay.classList.remove('show');
+                item.classList.remove('deleting');
+            }
+        }
+
+        function deleteItemPermanently(id) {
+            // Add fade out animation
+            const item = document.querySelector(`[data-id="${id}"]`);
+            if (item) {
+                item.style.opacity = '0';
+                item.style.transform = 'translateX(-100%)';
+                
+                setTimeout(() => {
+                    items = items.filter(i => i.id !== id);
+                    favorites.delete(id);
+                    saveData();
+                    renderItems();
+                }, 300);
+            }
+        }
         async function saveData() {
             try {
                 await db.collection('easylista').doc('userData').set({
