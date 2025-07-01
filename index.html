@@ -326,37 +326,10 @@
             margin-top: 10px;
         }
 
-        .delete-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: #dc3545;
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 12px;
-            font-weight: 600;
-            font-size: 16px;
-            gap: 8px;
-            opacity: 0;
-            transform: scale(0.8);
-            transition: all 0.3s ease;
-            z-index: 10;
-        }
-
-        .delete-overlay.show {
-            opacity: 1;
-            transform: scale(1);
-        }
-
         .item {
             position: relative;
             display: flex;
             align-items: center;
-            gap: 12px;
             padding: 16px;
             background: #f8f9fa;
             border-radius: 12px;
@@ -364,11 +337,7 @@
             transition: all 0.3s ease;
             border-left: 4px solid transparent;
             user-select: none;
-        }
-
-        .item.deleting {
-            transform: scale(0.95);
-            background: #ffe6e6;
+            overflow: hidden;
         }
     </style>
 </head>
@@ -447,8 +416,10 @@
         let currentTab = 'lista';
         let items = [];
         let favorites = new Set();
-        let deleteTimeout = null;
-        let currentDeleteElement = null;
+        let dragStartTime = null;
+        let isDraggable = false;
+        let swipeStartX = null;
+        let currentSwipedItem = null;
 
         // Initialize App
         document.addEventListener('DOMContentLoaded', function() {
@@ -499,12 +470,20 @@
             Sortable.create(listaContainer, {
                 animation: 150,
                 ghostClass: 'drag-placeholder',
-                handle: '.drag-handle', // Only allow dragging by handle
+                filter: function(evt) {
+                    // Only allow dragging if item is marked as draggable
+                    return !evt.target.closest('.item').classList.contains('draggable');
+                },
+                onStart: function(evt) {
+                    evt.item.classList.add('dragging');
+                },
                 onEnd: function(evt) {
+                    evt.item.classList.remove('dragging', 'draggable');
                     // Update order in items array
                     const movedItem = items.splice(evt.oldIndex, 1)[0];
                     items.splice(evt.newIndex, 0, movedItem);
                     saveData();
+                    isDraggable = false;
                 }
             });
         }
@@ -613,27 +592,31 @@
         function createItemHTML(item, showHistory = false) {
             const isFavorite = favorites.has(item.id);
             const purchaseInfo = showHistory ? ` (${item.purchaseCount}x)` : '';
-            const dragHandle = currentTab === 'lista' && !item.completed ? 
-                '<span class="drag-handle" title="Tieni premuto per spostare">⋮⋮</span>' : '';
             
             return `
                 <li class="item ${item.completed ? 'completed' : ''}" data-id="${item.id}"
-                    onmousedown="startDeleteTimer(${item.id}, event)"
-                    onmouseup="cancelDeleteTimer()"
-                    onmouseleave="cancelDeleteTimer()"
-                    ontouchstart="startDeleteTimer(${item.id}, event)"
-                    ontouchend="cancelDeleteTimer()"
-                    ontouchcancel="cancelDeleteTimer()">
-                    ${dragHandle}
-                    <input type="checkbox" class="item-checkbox" ${item.completed ? 'checked' : ''} 
-                           onchange="toggleItem(${item.id})" onclick="event.stopPropagation()">
-                    <span class="item-text">${item.text}${purchaseInfo}</span>
-                    <button class="favorite-btn" onclick="toggleFavorite(${item.id}); event.stopPropagation();" title="Aggiungi ai preferiti">
-                        ${isFavorite ? '❤️' : '🤍'}
-                    </button>
-                    <div class="delete-overlay" id="delete-${item.id}">
-                        🗑️ Elimina
+                    ${currentTab === 'lista' && !item.completed ? 
+                        `onmousedown="handleItemMouseDown(${item.id}, event)"
+                         onmouseup="handleItemMouseUp(${item.id})"
+                         onmouseleave="handleItemMouseUp(${item.id})"
+                         ontouchstart="handleItemTouchStart(${item.id}, event)"
+                         ontouchend="handleItemTouchEnd(${item.id})"
+                         ontouchmove="handleItemTouchMove(${item.id}, event)"
+                         ontouchcancel="handleItemTouchEnd(${item.id})"` : ''}>
+                    
+                    <div class="item-content">
+                        <input type="checkbox" class="item-checkbox" ${item.completed ? 'checked' : ''} 
+                               onchange="toggleItem(${item.id})" onclick="event.stopPropagation()">
+                        <span class="item-text">${item.text}${purchaseInfo}</span>
+                        <button class="favorite-btn" onclick="toggleFavorite(${item.id}); event.stopPropagation();" title="Aggiungi ai preferiti">
+                            ${isFavorite ? '❤️' : '🤍'}
+                        </button>
                     </div>
+                    
+                    ${currentTab === 'lista' && !item.completed ? 
+                        `<div class="delete-action" onclick="deleteItemPermanently(${item.id}); event.stopPropagation();">
+                            🗑️
+                        </div>` : ''}
                 </li>
             `;
         }
@@ -715,62 +698,103 @@
             closeAIModal();
         }
 
-        // Delete functionality
-        function startDeleteTimer(id, event) {
-            // Don't start timer if clicking on interactive elements
+        // Touch and Mouse Handlers for Lista items
+        function handleItemMouseDown(id, event) {
             if (event.target.classList.contains('item-checkbox') || 
-                event.target.classList.contains('favorite-btn') || 
-                event.target.classList.contains('drag-handle')) {
+                event.target.classList.contains('favorite-btn')) {
                 return;
             }
             
-            // Cancel any existing timer
-            cancelDeleteTimer();
-            
-            currentDeleteElement = id;
-            
-            // Start delete timer (1.5 seconds)
-            deleteTimeout = setTimeout(() => {
-                showDeleteOverlay(id);
+            dragStartTime = Date.now();
+            setTimeout(() => {
+                if (dragStartTime && (Date.now() - dragStartTime >= 1500)) {
+                    enableDragging(id);
+                }
             }, 1500);
         }
 
-        function cancelDeleteTimer() {
-            if (deleteTimeout) {
-                clearTimeout(deleteTimeout);
-                deleteTimeout = null;
+        function handleItemMouseUp(id) {
+            dragStartTime = null;
+        }
+
+        function handleItemTouchStart(id, event) {
+            if (event.target.classList.contains('item-checkbox') || 
+                event.target.classList.contains('favorite-btn')) {
+                return;
             }
             
-            if (currentDeleteElement) {
-                hideDeleteOverlay(currentDeleteElement);
-                currentDeleteElement = null;
+            const touch = event.touches[0];
+            swipeStartX = touch.clientX;
+            dragStartTime = Date.now();
+            
+            setTimeout(() => {
+                if (dragStartTime && (Date.now() - dragStartTime >= 1500)) {
+                    enableDragging(id);
+                }
+            }, 1500);
+        }
+
+        function handleItemTouchMove(id, event) {
+            if (!swipeStartX) return;
+            
+            const touch = event.touches[0];
+            const deltaX = swipeStartX - touch.clientX;
+            
+            // Reset drag timer if moving
+            dragStartTime = null;
+            
+            // Handle swipe to delete
+            if (deltaX > 30) {
+                handleSwipeLeft(id);
+            } else if (deltaX < -30) {
+                handleSwipeRight(id);
             }
         }
 
-        function showDeleteOverlay(id) {
-            const overlay = document.getElementById(`delete-${id}`);
+        function handleItemTouchEnd(id) {
+            dragStartTime = null;
+            swipeStartX = null;
+        }
+
+        function enableDragging(id) {
             const item = document.querySelector(`[data-id="${id}"]`);
-            
-            if (overlay && item) {
-                item.classList.add('deleting');
-                overlay.classList.add('show');
+            if (item) {
+                item.classList.add('draggable');
+                isDraggable = true;
                 
-                // Auto-delete after 2 more seconds if still showing
+                // Auto-disable after 5 seconds
                 setTimeout(() => {
-                    if (overlay.classList.contains('show')) {
-                        deleteItemPermanently(id);
+                    if (item.classList.contains('draggable')) {
+                        item.classList.remove('draggable');
+                        isDraggable = false;
                     }
-                }, 2000);
+                }, 5000);
             }
         }
 
-        function hideDeleteOverlay(id) {
-            const overlay = document.getElementById(`delete-${id}`);
-            const item = document.querySelector(`[data-id="${id}"]`);
+        function handleSwipeLeft(id) {
+            // Close any other swiped items
+            if (currentSwipedItem && currentSwipedItem !== id) {
+                const prevItem = document.querySelector(`[data-id="${currentSwipedItem}"]`);
+                if (prevItem) {
+                    prevItem.classList.remove('swiped');
+                }
+            }
             
-            if (overlay && item) {
-                overlay.classList.remove('show');
-                item.classList.remove('deleting');
+            const item = document.querySelector(`[data-id="${id}"]`);
+            if (item) {
+                item.classList.add('swiped');
+                currentSwipedItem = id;
+            }
+        }
+
+        function handleSwipeRight(id) {
+            const item = document.querySelector(`[data-id="${id}"]`);
+            if (item) {
+                item.classList.remove('swiped');
+                if (currentSwipedItem === id) {
+                    currentSwipedItem = null;
+                }
             }
         }
 
@@ -786,9 +810,17 @@
                     favorites.delete(id);
                     saveData();
                     renderItems();
+                    currentSwipedItem = null;
                 }, 300);
             }
         }
+
+        // Close swipe when clicking elsewhere
+        document.addEventListener('click', function(event) {
+            if (currentSwipedItem && !event.target.closest(`[data-id="${currentSwipedItem}"]`)) {
+                handleSwipeRight(currentSwipedItem);
+            }
+        });
         async function saveData() {
             try {
                 await db.collection('easylista').doc('userData').set({
