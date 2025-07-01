@@ -127,7 +127,6 @@
             background: #f8f9fa;
             border-radius: 12px;
             margin-bottom: 8px;
-            cursor: move;
             transition: all 0.3s ease;
             border-left: 4px solid transparent;
         }
@@ -327,6 +326,15 @@
         .drag-placeholder.active {
             opacity: 1;
         }
+
+        .ai-form-container {
+            margin-bottom: 20px;
+        }
+
+        .ai-search-btn {
+            width: 100%;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
@@ -373,9 +381,9 @@
                 <h3 class="modal-title">Suggerimenti AI</h3>
                 <p>Inserisci un piatto e ti suggerirò gli ingredienti</p>
             </div>
-            <div class="add-item-form">
+            <div class="ai-form-container">
                 <input type="text" class="add-input" id="aiInput" placeholder="es. Pizza, Risotto, Tiramisù...">
-                <button class="add-btn" onclick="getAISuggestions()">🔍</button>
+                <button class="add-btn ai-search-btn" onclick="getAISuggestions()">🔍 Cerca Ingredienti</button>
             </div>
             <div id="aiResults"></div>
             <div class="modal-buttons">
@@ -454,6 +462,7 @@
             Sortable.create(listaContainer, {
                 animation: 150,
                 ghostClass: 'drag-placeholder',
+                handle: '.drag-handle', // Only allow dragging by handle
                 onEnd: function(evt) {
                     // Update order in items array
                     const movedItem = items.splice(evt.oldIndex, 1)[0];
@@ -567,9 +576,12 @@
         function createItemHTML(item, showHistory = false) {
             const isFavorite = favorites.has(item.id);
             const purchaseInfo = showHistory ? ` (${item.purchaseCount}x)` : '';
+            const dragHandle = currentTab === 'lista' && !item.completed ? 
+                '<span class="drag-handle" title="Tieni premuto per spostare">⋮⋮</span>' : '';
             
             return `
                 <li class="item ${item.completed ? 'completed' : ''}" data-id="${item.id}">
+                    ${dragHandle}
                     <input type="checkbox" class="item-checkbox" ${item.completed ? 'checked' : ''} 
                            onchange="toggleItem(${item.id})">
                     <span class="item-text">${item.text}${purchaseInfo}</span>
