@@ -119,7 +119,27 @@
             list-style: none;
         }
 
+        .item {
+            position: relative;
+            display: flex;
+            align-items: center;
+            background: #f8f9fa;
+            border-radius: 12px;
+            margin-bottom: 8px;
+            transition: all 0.3s ease;
+            border-left: 4px solid transparent;
+            user-select: none;
+            overflow: hidden;
+        }
 
+        .item-content {
+            display: flex;
+            align-items: center;
+            padding: 16px;
+            width: 100%;
+            gap: 12px;
+            transition: transform 0.3s ease;
+        }
 
         .item:hover {
             transform: translateX(4px);
@@ -129,6 +149,9 @@
 
         .item.completed {
             opacity: 0.6;
+        }
+
+        .item.completed .item-text {
             text-decoration: line-through;
         }
 
@@ -137,6 +160,7 @@
             height: 20px;
             cursor: pointer;
             accent-color: #667eea;
+            flex-shrink: 0;
         }
 
         .item-text {
@@ -153,11 +177,39 @@
             padding: 4px;
             border-radius: 8px;
             transition: all 0.3s ease;
+            flex-shrink: 0;
         }
 
         .favorite-btn:hover {
             background: #e9ecef;
             transform: scale(1.1);
+        }
+
+        /* Delete action - nascosto di default */
+        .delete-action {
+            position: absolute;
+            right: 0;
+            top: 0;
+            height: 100%;
+            width: 60px;
+            background: #dc3545;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            cursor: pointer;
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+        }
+
+        /* Mostra delete action quando swiped */
+        .item.swiped .item-content {
+            transform: translateX(-60px);
+        }
+
+        .item.swiped .delete-action {
+            transform: translateX(0);
         }
 
         .ai-btn {
@@ -325,20 +377,6 @@
             width: 100%;
             margin-top: 10px;
         }
-
-        .item {
-            position: relative;
-            display: flex;
-            align-items: center;
-            padding: 16px;
-            background: #f8f9fa;
-            border-radius: 12px;
-            margin-bottom: 8px;
-            transition: all 0.3s ease;
-            border-left: 4px solid transparent;
-            user-select: none;
-            overflow: hidden;
-        }
     </style>
 </head>
 <body>
@@ -418,8 +456,10 @@
         let favorites = new Set();
         let dragStartTime = null;
         let isDraggable = false;
-        let swipeStartX = null;
+        let touchStartX = null;
+        let touchStartY = null;
         let currentSwipedItem = null;
+        let isScrolling = false;
 
         // Initialize App
         document.addEventListener('DOMContentLoaded', function() {
@@ -471,7 +511,6 @@
                 animation: 150,
                 ghostClass: 'drag-placeholder',
                 filter: function(evt) {
-                    // Only allow dragging if item is marked as draggable
                     return !evt.target.closest('.item').classList.contains('draggable');
                 },
                 onStart: function(evt) {
@@ -479,7 +518,6 @@
                 },
                 onEnd: function(evt) {
                     evt.item.classList.remove('dragging', 'draggable');
-                    // Update order in items array
                     const movedItem = items.splice(evt.oldIndex, 1)[0];
                     items.splice(evt.newIndex, 0, movedItem);
                     saveData();
@@ -594,16 +632,7 @@
             const purchaseInfo = showHistory ? ` (${item.purchaseCount}x)` : '';
             
             return `
-                <li class="item ${item.completed ? 'completed' : ''}" data-id="${item.id}"
-                    ${currentTab === 'lista' && !item.completed ? 
-                        `onmousedown="handleItemMouseDown(${item.id}, event)"
-                         onmouseup="handleItemMouseUp(${item.id})"
-                         onmouseleave="handleItemMouseUp(${item.id})"
-                         ontouchstart="handleItemTouchStart(${item.id}, event)"
-                         ontouchend="handleItemTouchEnd(${item.id})"
-                         ontouchmove="handleItemTouchMove(${item.id}, event)"
-                         ontouchcancel="handleItemTouchEnd(${item.id})"` : ''}>
-                    
+                <li class="item ${item.completed ? 'completed' : ''}" data-id="${item.id}">
                     <div class="item-content">
                         <input type="checkbox" class="item-checkbox" ${item.completed ? 'checked' : ''} 
                                onchange="toggleItem(${item.id})" onclick="event.stopPropagation()">
@@ -619,6 +648,129 @@
                         </div>` : ''}
                 </li>
             `;
+        }
+
+        // Touch handling per swipe
+        function setupTouchHandlers() {
+            const container = document.getElementById('listaItems');
+            
+            container.addEventListener('touchstart', function(e) {
+                const item = e.target.closest('.item');
+                if (!item || currentTab !== 'lista') return;
+                
+                const itemId = parseInt(item.dataset.id);
+                const itemObj = items.find(i => i.id === itemId);
+                if (!itemObj || itemObj.completed) return;
+                
+                if (e.target.classList.contains('item-checkbox') || 
+                    e.target.classList.contains('favorite-btn')) {
+                    return;
+                }
+                
+                const touch = e.touches[0];
+                touchStartX = touch.clientX;
+                touchStartY = touch.clientY;
+                isScrolling = false;
+                
+                // Chiudi altri swipe aperti
+                if (currentSwipedItem && currentSwipedItem !== itemId) {
+                    closeSwipe(currentSwipedItem);
+                }
+            }, { passive: true });
+            
+            container.addEventListener('touchmove', function(e) {
+                if (touchStartX === null || touchStartY === null) return;
+                
+                const touch = e.touches[0];
+                const deltaX = touchStartX - touch.clientX;
+                const deltaY = touchStartY - touch.clientY;
+                
+                // Determina se è scroll verticale o swipe orizzontale
+                if (!isScrolling && Math.abs(deltaY) > Math.abs(deltaX)) {
+                    isScrolling = true;
+                    return;
+                }
+                
+                if (isScrolling) return;
+                
+                // Previeni scroll se è swipe orizzontale
+                if (Math.abs(deltaX) > 10) {
+                    e.preventDefault();
+                }
+                
+                const item = e.target.closest('.item');
+                if (!item) return;
+                
+                const itemId = parseInt(item.dataset.id);
+                
+                // Swipe left per mostrare delete
+                if (deltaX > 30) {
+                    item.classList.add('swiped');
+                    currentSwipedItem = itemId;
+                }
+                // Swipe right per nascondere delete
+                else if (deltaX < -30 && item.classList.contains('swiped')) {
+                    item.classList.remove('swiped');
+                    if (currentSwipedItem === itemId) {
+                        currentSwipedItem = null;
+                    }
+                }
+            }, { passive: false });
+            
+            container.addEventListener('touchend', function(e) {
+                touchStartX = null;
+                touchStartY = null;
+                isScrolling = false;
+            }, { passive: true });
+        }
+
+        function closeSwipe(itemId) {
+            const item = document.querySelector(`[data-id="${itemId}"]`);
+            if (item) {
+                item.classList.remove('swiped');
+                if (currentSwipedItem === itemId) {
+                    currentSwipedItem = null;
+                }
+            }
+        }
+
+        function deleteItemPermanently(id) {
+            const item = document.querySelector(`[data-id="${id}"]`);
+            if (item) {
+                item.style.opacity = '0';
+                item.style.transform = 'translateX(-100%)';
+                
+                setTimeout(() => {
+                    items = items.filter(i => i.id !== id);
+                    favorites.delete(id);
+                    saveData();
+                    renderItems();
+                    currentSwipedItem = null;
+                }, 300);
+            }
+        }
+
+        // Chiudi swipe quando si clicca altrove
+        document.addEventListener('click', function(event) {
+            if (currentSwipedItem && !event.target.closest(`[data-id="${currentSwipedItem}"]`)) {
+                closeSwipe(currentSwipedItem);
+            }
+        });
+
+        // Setup touch handlers dopo il render
+        function renderLista() {
+            const container = document.getElementById('listaItems');
+            const activeItems = items.filter(item => !item.completed);
+            
+            if (activeItems.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📝</div><p>Nessun elemento nella lista</p></div>';
+                return;
+            }
+            
+            container.innerHTML = activeItems.map(item => createItemHTML(item)).join('');
+            
+            // Setup touch handlers ogni volta che renderizziamo
+            setupTouchHandlers();
         }
 
         // AI Functionality
@@ -642,7 +794,6 @@
             const resultsDiv = document.getElementById('aiResults');
             resultsDiv.innerHTML = '<div class="loading">🤖 Generando suggerimenti...</div>';
 
-            // Simulate AI suggestions (in real implementation, this would call Claude API)
             const suggestions = await simulateAISuggestions(dish);
             
             if (suggestions.length > 0) {
@@ -666,10 +817,8 @@
         }
 
         async function simulateAISuggestions(dish) {
-            // Simulate API delay
             await new Promise(resolve => setTimeout(resolve, 1500));
             
-            // Simple suggestion database
             const suggestions = {
                 'pizza': ['Farina 00', 'Lievito di birra', 'Pomodoro pelato', 'Mozzarella', 'Basilico', 'Olio extravergine'],
                 'risotto': ['Riso Carnaroli', 'Brodo vegetale', 'Cipolla', 'Vino bianco', 'Parmigiano', 'Burro'],
@@ -698,129 +847,6 @@
             closeAIModal();
         }
 
-        // Touch and Mouse Handlers for Lista items
-        function handleItemMouseDown(id, event) {
-            if (event.target.classList.contains('item-checkbox') || 
-                event.target.classList.contains('favorite-btn')) {
-                return;
-            }
-            
-            dragStartTime = Date.now();
-            setTimeout(() => {
-                if (dragStartTime && (Date.now() - dragStartTime >= 1500)) {
-                    enableDragging(id);
-                }
-            }, 1500);
-        }
-
-        function handleItemMouseUp(id) {
-            dragStartTime = null;
-        }
-
-        function handleItemTouchStart(id, event) {
-            if (event.target.classList.contains('item-checkbox') || 
-                event.target.classList.contains('favorite-btn')) {
-                return;
-            }
-            
-            const touch = event.touches[0];
-            swipeStartX = touch.clientX;
-            dragStartTime = Date.now();
-            
-            setTimeout(() => {
-                if (dragStartTime && (Date.now() - dragStartTime >= 1500)) {
-                    enableDragging(id);
-                }
-            }, 1500);
-        }
-
-        function handleItemTouchMove(id, event) {
-            if (!swipeStartX) return;
-            
-            const touch = event.touches[0];
-            const deltaX = swipeStartX - touch.clientX;
-            
-            // Reset drag timer if moving
-            dragStartTime = null;
-            
-            // Handle swipe to delete
-            if (deltaX > 30) {
-                handleSwipeLeft(id);
-            } else if (deltaX < -30) {
-                handleSwipeRight(id);
-            }
-        }
-
-        function handleItemTouchEnd(id) {
-            dragStartTime = null;
-            swipeStartX = null;
-        }
-
-        function enableDragging(id) {
-            const item = document.querySelector(`[data-id="${id}"]`);
-            if (item) {
-                item.classList.add('draggable');
-                isDraggable = true;
-                
-                // Auto-disable after 5 seconds
-                setTimeout(() => {
-                    if (item.classList.contains('draggable')) {
-                        item.classList.remove('draggable');
-                        isDraggable = false;
-                    }
-                }, 5000);
-            }
-        }
-
-        function handleSwipeLeft(id) {
-            // Close any other swiped items
-            if (currentSwipedItem && currentSwipedItem !== id) {
-                const prevItem = document.querySelector(`[data-id="${currentSwipedItem}"]`);
-                if (prevItem) {
-                    prevItem.classList.remove('swiped');
-                }
-            }
-            
-            const item = document.querySelector(`[data-id="${id}"]`);
-            if (item) {
-                item.classList.add('swiped');
-                currentSwipedItem = id;
-            }
-        }
-
-        function handleSwipeRight(id) {
-            const item = document.querySelector(`[data-id="${id}"]`);
-            if (item) {
-                item.classList.remove('swiped');
-                if (currentSwipedItem === id) {
-                    currentSwipedItem = null;
-                }
-            }
-        }
-
-        function deleteItemPermanently(id) {
-            // Add fade out animation
-            const item = document.querySelector(`[data-id="${id}"]`);
-            if (item) {
-                item.style.opacity = '0';
-                item.style.transform = 'translateX(-100%)';
-                
-                setTimeout(() => {
-                    items = items.filter(i => i.id !== id);
-                    favorites.delete(id);
-                    saveData();
-                    renderItems();
-                    currentSwipedItem = null;
-                }, 300);
-            }
-        }
-
-        // Close swipe when clicking elsewhere
-        document.addEventListener('click', function(event) {
-            if (currentSwipedItem && !event.target.closest(`[data-id="${currentSwipedItem}"]`)) {
-                handleSwipeRight(currentSwipedItem);
-            }
-        });
         async function saveData() {
             try {
                 await db.collection('easylista').doc('userData').set({
@@ -844,7 +870,6 @@
                 }
             } catch (error) {
                 console.error('Errore nel caricare i dati:', error);
-                // Continue with empty data if Firebase fails
                 renderItems();
             }
         }
