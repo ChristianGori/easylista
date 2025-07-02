@@ -464,6 +464,24 @@
         </div>
     </div>
 
+	<!-- AI Modal -->
+    <div class="modal" id="aiModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Suggerimenti AI</h3>
+                <p>Inserisci un piatto e ti suggerirò gli ingredienti</p>
+            </div>
+            <div class="ai-form-container">
+                <input type="text" class="add-input" id="aiInput" placeholder="es. Pizza, Risotto, Tiramisù...">
+                <button class="add-btn ai-search-btn" onclick="getAISuggestions()">🔍 Cerca Ingredienti</button>
+            </div>
+            <div id="aiResults"></div>
+            <div class="modal-buttons">
+                <button class="modal-btn btn-secondary" onclick="closeAIModal()">Chiudi</button>
+            </div>
+        </div>
+    </div>
+	
     <script>
         // Firebase Configuration
         const firebaseConfig = {
@@ -896,6 +914,80 @@
             }
         });
 
+		// AI Functionality
+		function openAIModal() {
+            document.getElementById('aiModal').classList.add('show');
+            document.getElementById('aiInput').focus();
+        }
+
+        function closeAIModal() {
+            document.getElementById('aiModal').classList.remove('show');
+            document.getElementById('aiInput').value = '';
+            document.getElementById('aiResults').innerHTML = '';
+        }
+
+        async function getAISuggestions() {
+            const input = document.getElementById('aiInput');
+            const dish = input.value.trim();
+            
+            if (!dish) return;
+
+            const resultsDiv = document.getElementById('aiResults');
+            resultsDiv.innerHTML = '<div class="loading">🤖 Generando suggerimenti...</div>';
+
+            const suggestions = await simulateAISuggestions(dish);
+            
+            if (suggestions.length > 0) {
+                resultsDiv.innerHTML = `
+                    <div class="section-header">Ingredienti suggeriti per "${dish}"</div>
+                    <ul class="suggested-items">
+                        ${suggestions.map((suggestion, index) => `
+                            <li class="suggested-item">
+                                <input type="checkbox" class="suggested-checkbox" id="suggestion-${index}" checked>
+                                <label for="suggestion-${index}" class="suggested-text">${suggestion}</label>
+                            </li>
+                        `).join('')}
+                    </ul>
+                    <div class="modal-buttons">
+                        <button class="modal-btn btn-primary" onclick="addSuggestedItems()">Aggiungi Selezionati</button>
+                    </div>
+                `;
+            } else {
+                resultsDiv.innerHTML = '<div class="empty-state"><p>Nessun suggerimento trovato</p></div>';
+            }
+        }
+
+        async function simulateAISuggestions(dish) {
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            
+            const suggestions = {
+                'pizza': ['Farina 00', 'Lievito di birra', 'Pomodoro pelato', 'Mozzarella', 'Basilico', 'Olio extravergine'],
+                'risotto': ['Riso Carnaroli', 'Brodo vegetale', 'Cipolla', 'Vino bianco', 'Parmigiano', 'Burro'],
+                'tiramisù': ['Mascarpone', 'Savoiardi', 'Caffè', 'Uova', 'Zucchero', 'Cacao amaro'],
+                'carbonara': ['Spaghetti', 'Guanciale', 'Uova', 'Pecorino Romano', 'Pepe nero'],
+                'lasagne': ['Pasta per lasagne', 'Ragù', 'Besciamella', 'Parmigiano', 'Mozzarella'],
+                'minestrone': ['Verdure miste', 'Fagioli', 'Pomodoro', 'Sedano', 'Carote', 'Cipolla', 'Brodo vegetale']
+            };
+
+            const key = dish.toLowerCase();
+            return suggestions[key] || generateGenericSuggestions(dish);
+        }
+
+        function generateGenericSuggestions(dish) {
+            const common = ['Sale', 'Pepe', 'Olio extravergine', 'Aglio', 'Cipolla'];
+            return common.slice(0, 3);
+        }
+
+        function addSuggestedItems() {
+            const checkboxes = document.querySelectorAll('.suggested-checkbox:checked');
+            const selectedItems = Array.from(checkboxes).map(cb => 
+                cb.nextElementSibling.textContent
+            );
+            
+            selectedItems.forEach(item => addItem(item));
+            closeAIModal();
+        }
+		
         async function saveData() {
             try {
                 await db.collection('easylista').doc('userData').set({
@@ -925,3 +1017,4 @@
     </script>
 </body>
 </html>
+                
