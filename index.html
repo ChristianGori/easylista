@@ -155,14 +155,6 @@
             text-decoration: line-through;
         }
 
-        .item-checkbox {
-            width: 20px;
-            height: 20px;
-            cursor: pointer;
-            accent-color: #667eea;
-            flex-shrink: 0;
-        }
-
         .item-text {
             flex: 1;
             font-size: 16px;
@@ -203,12 +195,39 @@
             transition: transform 0.3s ease;
         }
 
-        /* Mostra delete action quando swiped */
-        .item.swiped .item-content {
+        /* Complete action - nascosto di default */
+        .complete-action {
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            width: 60px;
+            background: #28a745;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            cursor: pointer;
+            transform: translateX(-100%);
+            transition: transform 0.3s ease;
+        }
+
+        /* Mostra delete action quando swiped left */
+        .item.swiped-left .item-content {
             transform: translateX(-60px);
         }
 
-        .item.swiped .delete-action {
+        .item.swiped-left .delete-action {
+            transform: translateX(0);
+        }
+
+        /* Mostra complete action quando swiped right */
+        .item.swiped-right .item-content {
+            transform: translateX(60px);
+        }
+
+        .item.swiped-right .complete-action {
             transform: translateX(0);
         }
 
@@ -377,6 +396,15 @@
             width: 100%;
             margin-top: 10px;
         }
+
+        /* Aggiunta casella di controllo solo per storico e preferiti */
+        .item-checkbox {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+            accent-color: #667eea;
+            flex-shrink: 0;
+        }
     </style>
 </head>
 <body>
@@ -459,6 +487,7 @@
         let touchStartX = null;
         let touchStartY = null;
         let currentSwipedItem = null;
+        let currentSwipeDirection = null;
         let isScrolling = false;
 
         // Initialize App
@@ -601,6 +630,7 @@
             }
             
             container.innerHTML = activeItems.map(item => createItemHTML(item)).join('');
+            setupTouchHandlers();
         }
 
         function renderStorico() {
@@ -630,22 +660,29 @@
         function createItemHTML(item, showHistory = false) {
             const isFavorite = favorites.has(item.id);
             const purchaseInfo = showHistory ? ` (${item.purchaseCount}x)` : '';
+            const isListaTab = currentTab === 'lista';
             
             return `
                 <li class="item ${item.completed ? 'completed' : ''}" data-id="${item.id}">
                     <div class="item-content">
-                        <input type="checkbox" class="item-checkbox" ${item.completed ? 'checked' : ''} 
-                               onchange="toggleItem(${item.id})" onclick="event.stopPropagation()">
+                        ${!isListaTab || item.completed ? `
+                            <input type="checkbox" class="item-checkbox" ${item.completed ? 'checked' : ''} 
+                                   onchange="toggleItem(${item.id})" onclick="event.stopPropagation()">
+                        ` : ''}
                         <span class="item-text">${item.text}${purchaseInfo}</span>
                         <button class="favorite-btn" onclick="toggleFavorite(${item.id}); event.stopPropagation();" title="Aggiungi ai preferiti">
                             ${isFavorite ? '❤️' : '🤍'}
                         </button>
                     </div>
                     
-                    ${currentTab === 'lista' && !item.completed ? 
-                        `<div class="delete-action" onclick="deleteItemPermanently(${item.id}); event.stopPropagation();">
+                    ${isListaTab && !item.completed ? `
+                        <div class="complete-action" onclick="completeItem(${item.id}); event.stopPropagation();">
+                            🛒
+                        </div>
+                        <div class="delete-action" onclick="deleteItemPermanently(${item.id}); event.stopPropagation();">
                             🗑️
-                        </div>` : ''}
+                        </div>
+                    ` : ''}
                 </li>
             `;
         }
@@ -662,8 +699,7 @@
                 const itemObj = items.find(i => i.id === itemId);
                 if (!itemObj || itemObj.completed) return;
                 
-                if (e.target.classList.contains('item-checkbox') || 
-                    e.target.classList.contains('favorite-btn')) {
+                if (e.target.classList.contains('favorite-btn')) {
                     return;
                 }
                 
@@ -703,16 +739,26 @@
                 
                 const itemId = parseInt(item.dataset.id);
                 
-                // Swipe left per mostrare delete
+                // Rimuovi classi precedenti
+                item.classList.remove('swiped-left', 'swiped-right');
+                
+                // Swipe left per mostrare delete (rosso)
                 if (deltaX > 30) {
-                    item.classList.add('swiped');
+                    item.classList.add('swiped-left');
                     currentSwipedItem = itemId;
+                    currentSwipeDirection = 'left';
                 }
-                // Swipe right per nascondere delete
-                else if (deltaX < -30 && item.classList.contains('swiped')) {
-                    item.classList.remove('swiped');
+                // Swipe right per mostrare complete (verde)
+                else if (deltaX < -30) {
+                    item.classList.add('swiped-right');
+                    currentSwipedItem = itemId;
+                    currentSwipeDirection = 'right';
+                }
+                // Reset se non c'è swipe significativo
+                else {
                     if (currentSwipedItem === itemId) {
                         currentSwipedItem = null;
+                        currentSwipeDirection = null;
                     }
                 }
             }, { passive: false });
@@ -727,10 +773,25 @@
         function closeSwipe(itemId) {
             const item = document.querySelector(`[data-id="${itemId}"]`);
             if (item) {
-                item.classList.remove('swiped');
+                item.classList.remove('swiped-left', 'swiped-right');
                 if (currentSwipedItem === itemId) {
                     currentSwipedItem = null;
+                    currentSwipeDirection = null;
                 }
+            }
+        }
+
+        function completeItem(id) {
+            const item = document.querySelector(`[data-id="${id}"]`);
+            if (item) {
+                item.style.opacity = '0';
+                item.style.transform = 'translateX(100%)';
+                
+                setTimeout(() => {
+                    toggleItem(id);
+                    currentSwipedItem = null;
+                    currentSwipeDirection = null;
+                }, 300);
             }
         }
 
@@ -746,6 +807,7 @@
                     saveData();
                     renderItems();
                     currentSwipedItem = null;
+                    currentSwipeDirection = null;
                 }, 300);
             }
         }
@@ -756,22 +818,6 @@
                 closeSwipe(currentSwipedItem);
             }
         });
-
-        // Setup touch handlers dopo il render
-        function renderLista() {
-            const container = document.getElementById('listaItems');
-            const activeItems = items.filter(item => !item.completed);
-            
-            if (activeItems.length === 0) {
-                container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📝</div><p>Nessun elemento nella lista</p></div>';
-                return;
-            }
-            
-            container.innerHTML = activeItems.map(item => createItemHTML(item)).join('');
-            
-            // Setup touch handlers ogni volta che renderizziamo
-            setupTouchHandlers();
-        }
 
         // AI Functionality
         function openAIModal() {
@@ -838,15 +884,15 @@
         }
 
         function addSuggestedItems() {
+        function addSuggestedItems
             const checkboxes = document.querySelectorAll('.suggested-checkbox:checked');
-            const selectedItems = Array.from(checkboxes).map(cb => 
+            const selectedItems = Array.from(checkboxes).map(cb =>
                 cb.nextElementSibling.textContent
             );
             
             selectedItems.forEach(item => addItem(item));
             closeAIModal();
         }
-
         async function saveData() {
             try {
                 await db.collection('easylista').doc('userData').set({
@@ -858,7 +904,6 @@
                 console.error('Errore nel salvare i dati:', error);
             }
         }
-
         async function loadData() {
             try {
                 const doc = await db.collection('easylista').doc('userData').get();
@@ -873,7 +918,6 @@
                 renderItems();
             }
         }
-
         // Close modal when clicking outside
         document.getElementById('aiModal').addEventListener('click', function(e) {
             if (e.target === this) {
