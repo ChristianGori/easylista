@@ -239,6 +239,27 @@
             transform: translateX(0);
         }
 
+        /* Drag and drop styling */
+        .item.sortable-chosen {
+            background: #e3f2fd !important;
+            border-left-color: #2196f3 !important;
+            transform: scale(1.02);
+        }
+
+        .item.sortable-ghost {
+            opacity: 0.5;
+            background: #f0f0f0;
+        }
+
+        .item.sortable-drag {
+            transform: rotate(5deg);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+        }
+
+        .sortable-fallback {
+            display: none;
+        }
+
         .ai-btn {
             position: fixed;
             bottom: 30px;
@@ -470,6 +491,7 @@
         let currentSwipedItem = null;
         let swipeDirection = null; // 'left' or 'right'
         let isScrolling = false;
+        let sortableInstance = null;
 
         // Initialize App
         document.addEventListener('DOMContentLoaded', function() {
@@ -508,26 +530,79 @@
 
             currentTab = tabName;
             renderItems();
+            
+            // Setup sortable only for lista tab
+            if (tabName === 'lista') {
+                setupSortable();
+            }
         }
 
         // Sortable Setup
         function setupSortable() {
             const listaContainer = document.getElementById('listaItems');
-            Sortable.create(listaContainer, {
-                animation: 150,
-                ghostClass: 'drag-placeholder',
-                filter: function(evt) {
-                    return !evt.target.closest('.item').classList.contains('draggable');
-                },
+            
+            // Destroy existing sortable instance
+            if (sortableInstance) {
+                sortableInstance.destroy();
+            }
+            
+            sortableInstance = Sortable.create(listaContainer, {
+                animation: 200,
+                delay: 200, // Delay per distinguere tra tap e drag
+                delayOnTouchStart: true,
+                ghostClass: 'sortable-ghost',
+                chosenClass: 'sortable-chosen',
+                dragClass: 'sortable-drag',
+                fallbackClass: 'sortable-fallback',
+                filter: '.favorite-btn, .delete-action, .purchase-action', // Esclude questi elementi dal drag
+                preventOnFilter: false,
                 onStart: function(evt) {
+                    // Chiudi eventuali swipe aperti
+                    if (currentSwipedItem) {
+                        closeSwipe(currentSwipedItem);
+                    }
                     evt.item.classList.add('dragging');
                 },
                 onEnd: function(evt) {
-                    evt.item.classList.remove('dragging', 'draggable');
-                    const movedItem = items.splice(evt.oldIndex, 1)[0];
-                    items.splice(evt.newIndex, 0, movedItem);
-                    saveData();
-                    isDraggable = false;
+                    evt.item.classList.remove('dragging');
+                    
+                    // Solo se la posizione è cambiata
+                    if (evt.oldIndex !== evt.newIndex) {
+                        const activeItems = items.filter(item => !item.completed);
+                        const movedItem = activeItems[evt.oldIndex];
+                        
+                        // Rimuovi l'elemento dalla posizione originale
+                        const originalIndex = items.findIndex(i => i.id === movedItem.id);
+                        items.splice(originalIndex, 1);
+                        
+                        // Trova la nuova posizione nell'array completo
+                        let newPosition = 0;
+                        let activeCount = 0;
+                        for (let i = 0; i < items.length; i++) {
+                            if (!items[i].completed) {
+                                if (activeCount === evt.newIndex) {
+                                    newPosition = i;
+                                    break;
+                                }
+                                activeCount++;
+                            }
+                            if (activeCount > evt.newIndex) {
+                                newPosition = i;
+                                break;
+                            }
+                        }
+                        
+                        // Se tutti gli altri elementi sono completati, metti alla fine
+                        if (activeCount <= evt.newIndex) {
+                            newPosition = items.filter(item => !item.completed).length;
+                        }
+                        
+                        // Inserisci nella nuova posizione
+                        items.splice(newPosition, 0, movedItem);
+                        
+                        saveData();
+                        renderItems();
+                    }
                 }
             });
         }
@@ -580,6 +655,16 @@
             favorites.delete(id);
             saveData();
             renderItems();
+        }
+
+        // Nuova funzione per spostare elemento dallo storico alla lista
+        function moveToList(id) {
+            const item = items.find(i => i.id === id);
+            if (item) {
+                item.completed = false;
+                saveData();
+                renderItems();
+            }
         }
 
         // Rendering
@@ -640,6 +725,24 @@
             const isFavorite = favorites.has(item.id);
             const purchaseInfo = showHistory ? ` (${item.purchaseCount}x)` : '';
             
+            // Per il menu storico, mostra checkbox per spostare nella lista
+            if (showHistory) {
+                return `
+                    <li class="item ${item.completed ? 'completed' : ''}" data-id="${item.id}">
+                        <div class="item-content">
+                            <input type="checkbox" class="item-checkbox" 
+                                   ${item.completed ? 'checked' : ''} 
+                                   onchange="moveToList(${item.id}); event.stopPropagation();">
+                            <span class="item-text">${item.text}${purchaseInfo}</span>
+                            <button class="favorite-btn" onclick="toggleFavorite(${item.id}); event.stopPropagation();" title="Aggiungi ai preferiti">
+                                ${isFavorite ? '❤️' : '🤍'}
+                            </button>
+                        </div>
+                    </li>
+                `;
+            }
+            
+            // Per gli altri menu, comportamento normale
             return `
                 <li class="item ${item.completed ? 'completed' : ''}" data-id="${item.id}">
                     <div class="item-content">
@@ -816,7 +919,7 @@
                 }
             } catch (error) {
                 console.error('Errore nel caricare i dati:', error);
-                renderItems();
+				renderItems();
             }
         }
     </script>
