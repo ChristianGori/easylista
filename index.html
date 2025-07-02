@@ -155,6 +155,14 @@
             text-decoration: line-through;
         }
 
+        .item-checkbox {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+            accent-color: #667eea;
+            flex-shrink: 0;
+        }
+
         .item-text {
             flex: 1;
             font-size: 16px;
@@ -177,7 +185,7 @@
             transform: scale(1.1);
         }
 
-        /* Delete action - nascosto di default */
+        /* Delete action - nascosto di default (swipe left) */
         .delete-action {
             position: absolute;
             right: 0;
@@ -195,8 +203,8 @@
             transition: transform 0.3s ease;
         }
 
-        /* Complete action - nascosto di default */
-        .complete-action {
+        /* Purchase action - nascosto di default (swipe right) */
+        .purchase-action {
             position: absolute;
             left: 0;
             top: 0;
@@ -222,12 +230,12 @@
             transform: translateX(0);
         }
 
-        /* Mostra complete action quando swiped right */
+        /* Mostra purchase action quando swiped right */
         .item.swiped-right .item-content {
             transform: translateX(60px);
         }
 
-        .item.swiped-right .complete-action {
+        .item.swiped-right .purchase-action {
             transform: translateX(0);
         }
 
@@ -396,15 +404,6 @@
             width: 100%;
             margin-top: 10px;
         }
-
-        /* Aggiunta casella di controllo solo per storico e preferiti */
-        .item-checkbox {
-            width: 20px;
-            height: 20px;
-            cursor: pointer;
-            accent-color: #667eea;
-            flex-shrink: 0;
-        }
     </style>
 </head>
 <body>
@@ -444,24 +443,6 @@
         </div>
     </div>
 
-    <!-- AI Modal -->
-    <div class="modal" id="aiModal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 class="modal-title">Suggerimenti AI</h3>
-                <p>Inserisci un piatto e ti suggerirò gli ingredienti</p>
-            </div>
-            <div class="ai-form-container">
-                <input type="text" class="add-input" id="aiInput" placeholder="es. Pizza, Risotto, Tiramisù...">
-                <button class="add-btn ai-search-btn" onclick="getAISuggestions()">🔍 Cerca Ingredienti</button>
-            </div>
-            <div id="aiResults"></div>
-            <div class="modal-buttons">
-                <button class="modal-btn btn-secondary" onclick="closeAIModal()">Chiudi</button>
-            </div>
-        </div>
-    </div>
-
     <script>
         // Firebase Configuration
         const firebaseConfig = {
@@ -487,7 +468,7 @@
         let touchStartX = null;
         let touchStartY = null;
         let currentSwipedItem = null;
-        let currentSwipeDirection = null;
+        let swipeDirection = null; // 'left' or 'right'
         let isScrolling = false;
 
         // Initialize App
@@ -499,10 +480,6 @@
             // Enter key support for input
             document.getElementById('newItemInput').addEventListener('keypress', function(e) {
                 if (e.key === 'Enter') addItem();
-            });
-            
-            document.getElementById('aiInput').addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') getAISuggestions();
             });
         });
 
@@ -630,6 +607,8 @@
             }
             
             container.innerHTML = activeItems.map(item => createItemHTML(item)).join('');
+            
+            // Setup touch handlers ogni volta che renderizziamo
             setupTouchHandlers();
         }
 
@@ -660,29 +639,23 @@
         function createItemHTML(item, showHistory = false) {
             const isFavorite = favorites.has(item.id);
             const purchaseInfo = showHistory ? ` (${item.purchaseCount}x)` : '';
-            const isListaTab = currentTab === 'lista';
             
             return `
                 <li class="item ${item.completed ? 'completed' : ''}" data-id="${item.id}">
                     <div class="item-content">
-                        ${!isListaTab || item.completed ? `
-                            <input type="checkbox" class="item-checkbox" ${item.completed ? 'checked' : ''} 
-                                   onchange="toggleItem(${item.id})" onclick="event.stopPropagation()">
-                        ` : ''}
                         <span class="item-text">${item.text}${purchaseInfo}</span>
                         <button class="favorite-btn" onclick="toggleFavorite(${item.id}); event.stopPropagation();" title="Aggiungi ai preferiti">
                             ${isFavorite ? '❤️' : '🤍'}
                         </button>
                     </div>
                     
-                    ${isListaTab && !item.completed ? `
-                        <div class="complete-action" onclick="completeItem(${item.id}); event.stopPropagation();">
-                            🛒
-                        </div>
-                        <div class="delete-action" onclick="deleteItemPermanently(${item.id}); event.stopPropagation();">
+                    ${currentTab === 'lista' && !item.completed ? 
+                        `<div class="delete-action" onclick="deleteItemPermanently(${item.id}); event.stopPropagation();">
                             🗑️
                         </div>
-                    ` : ''}
+                        <div class="purchase-action" onclick="purchaseItem(${item.id}); event.stopPropagation();">
+                            🛒
+                        </div>` : ''}
                 </li>
             `;
         }
@@ -707,6 +680,7 @@
                 touchStartX = touch.clientX;
                 touchStartY = touch.clientY;
                 isScrolling = false;
+                swipeDirection = null;
                 
                 // Chiudi altri swipe aperti
                 if (currentSwipedItem && currentSwipedItem !== itemId) {
@@ -718,7 +692,7 @@
                 if (touchStartX === null || touchStartY === null) return;
                 
                 const touch = e.touches[0];
-                const deltaX = touchStartX - touch.clientX;
+                const deltaX = touch.clientX - touchStartX;
                 const deltaY = touchStartY - touch.clientY;
                 
                 // Determina se è scroll verticale o swipe orizzontale
@@ -739,26 +713,26 @@
                 
                 const itemId = parseInt(item.dataset.id);
                 
-                // Rimuovi classi precedenti
-                item.classList.remove('swiped-left', 'swiped-right');
-                
-                // Swipe left per mostrare delete (rosso)
-                if (deltaX > 30) {
+                // Swipe left per mostrare delete (deltaX negativo)
+                if (deltaX < -30) {
+                    item.classList.remove('swiped-right');
                     item.classList.add('swiped-left');
                     currentSwipedItem = itemId;
-                    currentSwipeDirection = 'left';
+                    swipeDirection = 'left';
                 }
-                // Swipe right per mostrare complete (verde)
-                else if (deltaX < -30) {
+                // Swipe right per mostrare purchase (deltaX positivo)
+                else if (deltaX > 30) {
+                    item.classList.remove('swiped-left');
                     item.classList.add('swiped-right');
                     currentSwipedItem = itemId;
-                    currentSwipeDirection = 'right';
+                    swipeDirection = 'right';
                 }
-                // Reset se non c'è swipe significativo
-                else {
+                // Reset se swipe è troppo piccolo
+                else if (Math.abs(deltaX) < 10) {
+                    item.classList.remove('swiped-left', 'swiped-right');
                     if (currentSwipedItem === itemId) {
                         currentSwipedItem = null;
-                        currentSwipeDirection = null;
+                        swipeDirection = null;
                     }
                 }
             }, { passive: false });
@@ -776,22 +750,8 @@
                 item.classList.remove('swiped-left', 'swiped-right');
                 if (currentSwipedItem === itemId) {
                     currentSwipedItem = null;
-                    currentSwipeDirection = null;
+                    swipeDirection = null;
                 }
-            }
-        }
-
-        function completeItem(id) {
-            const item = document.querySelector(`[data-id="${id}"]`);
-            if (item) {
-                item.style.opacity = '0';
-                item.style.transform = 'translateX(100%)';
-                
-                setTimeout(() => {
-                    toggleItem(id);
-                    currentSwipedItem = null;
-                    currentSwipeDirection = null;
-                }, 300);
             }
         }
 
@@ -807,7 +767,21 @@
                     saveData();
                     renderItems();
                     currentSwipedItem = null;
-                    currentSwipeDirection = null;
+                    swipeDirection = null;
+                }, 300);
+            }
+        }
+
+        function purchaseItem(id) {
+            const item = document.querySelector(`[data-id="${id}"]`);
+            if (item) {
+                item.style.opacity = '0';
+                item.style.transform = 'translateX(100%)';
+                
+                setTimeout(() => {
+                    toggleItem(id); // Segna come completato
+                    currentSwipedItem = null;
+                    swipeDirection = null;
                 }, 300);
             }
         }
@@ -819,80 +793,6 @@
             }
         });
 
-        // AI Functionality
-        function openAIModal() {
-            document.getElementById('aiModal').classList.add('show');
-            document.getElementById('aiInput').focus();
-        }
-
-        function closeAIModal() {
-            document.getElementById('aiModal').classList.remove('show');
-            document.getElementById('aiInput').value = '';
-            document.getElementById('aiResults').innerHTML = '';
-        }
-
-        async function getAISuggestions() {
-            const input = document.getElementById('aiInput');
-            const dish = input.value.trim();
-            
-            if (!dish) return;
-
-            const resultsDiv = document.getElementById('aiResults');
-            resultsDiv.innerHTML = '<div class="loading">🤖 Generando suggerimenti...</div>';
-
-            const suggestions = await simulateAISuggestions(dish);
-            
-            if (suggestions.length > 0) {
-                resultsDiv.innerHTML = `
-                    <div class="section-header">Ingredienti suggeriti per "${dish}"</div>
-                    <ul class="suggested-items">
-                        ${suggestions.map((suggestion, index) => `
-                            <li class="suggested-item">
-                                <input type="checkbox" class="suggested-checkbox" id="suggestion-${index}" checked>
-                                <label for="suggestion-${index}" class="suggested-text">${suggestion}</label>
-                            </li>
-                        `).join('')}
-                    </ul>
-                    <div class="modal-buttons">
-                        <button class="modal-btn btn-primary" onclick="addSuggestedItems()">Aggiungi Selezionati</button>
-                    </div>
-                `;
-            } else {
-                resultsDiv.innerHTML = '<div class="empty-state"><p>Nessun suggerimento trovato</p></div>';
-            }
-        }
-
-        async function simulateAISuggestions(dish) {
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            
-            const suggestions = {
-                'pizza': ['Farina 00', 'Lievito di birra', 'Pomodoro pelato', 'Mozzarella', 'Basilico', 'Olio extravergine'],
-                'risotto': ['Riso Carnaroli', 'Brodo vegetale', 'Cipolla', 'Vino bianco', 'Parmigiano', 'Burro'],
-                'tiramisù': ['Mascarpone', 'Savoiardi', 'Caffè', 'Uova', 'Zucchero', 'Cacao amaro'],
-                'carbonara': ['Spaghetti', 'Guanciale', 'Uova', 'Pecorino Romano', 'Pepe nero'],
-                'lasagne': ['Pasta per lasagne', 'Ragù', 'Besciamella', 'Parmigiano', 'Mozzarella'],
-                'minestrone': ['Verdure miste', 'Fagioli', 'Pomodoro', 'Sedano', 'Carote', 'Cipolla', 'Brodo vegetale']
-            };
-
-            const key = dish.toLowerCase();
-            return suggestions[key] || generateGenericSuggestions(dish);
-        }
-
-        function generateGenericSuggestions(dish) {
-            const common = ['Sale', 'Pepe', 'Olio extravergine', 'Aglio', 'Cipolla'];
-            return common.slice(0, 3);
-        }
-
-        function addSuggestedItems() {
-        function addSuggestedItems
-            const checkboxes = document.querySelectorAll('.suggested-checkbox:checked');
-            const selectedItems = Array.from(checkboxes).map(cb =>
-                cb.nextElementSibling.textContent
-            );
-            
-            selectedItems.forEach(item => addItem(item));
-            closeAIModal();
-        }
         async function saveData() {
             try {
                 await db.collection('easylista').doc('userData').set({
@@ -904,6 +804,7 @@
                 console.error('Errore nel salvare i dati:', error);
             }
         }
+
         async function loadData() {
             try {
                 const doc = await db.collection('easylista').doc('userData').get();
@@ -918,12 +819,6 @@
                 renderItems();
             }
         }
-        // Close modal when clicking outside
-        document.getElementById('aiModal').addEventListener('click', function(e) {
-            if (e.target === this) {
-                closeAIModal();
-            }
-        });
     </script>
 </body>
 </html>
